@@ -1,0 +1,55 @@
+[
+    {
+        "inquilino": "Juan Perez",
+        "monto": 159720.0,
+        "indice": "IPC",
+        "aumento": 10,
+        "inicio": "2024-01-01",
+        "periodo": 6,
+        "ultimo_pago": "2026-02-26",
+        "historial": [
+            {
+                "fecha": "2026-02-26",
+                "indice": "IPC",
+                "monto_anterior": 132000.0,
+                "monto_nuevo": 145200.0
+            },
+            {
+                "fecha": "2026-02-26",
+                "indice": "IPC",
+                "monto_anterior": 145200.0,
+                "monto_nuevo": 159720.0
+            }
+        ]
+    },
+    {
+        "inquilino": "Maria Gomez",
+        "monto": 95000,
+        "indice": "ICL",
+        "aumento": 8,
+        "inicio": "2024-02-01",
+        "periodo": 4,
+        "ultimo_pago": "2024-04-01",
+        "historial": []
+    },
+    {
+        "inquilino": "Carlos Lopez",
+        "monto": 150000,
+        "indice": "IPC",
+        "aumento": 12,
+        "inicio": "2023-11-01",
+        "periodo": 3,
+        "ultimo_pago": "2024-01-01",
+        "historial": []
+    },
+    {
+        "inquilino": "Analia Gómez",
+        "monto": 150000.0,
+        "indice": "IPC",
+        "aumento": 50.0,
+        "inicio": "2026-01-08",
+        "periodo": 3,
+        "ultimo_pago": "2026-01-08",
+        "historial": []
+    }
+]
