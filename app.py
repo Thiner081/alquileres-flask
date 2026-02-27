@@ -33,7 +33,85 @@ def crear_tabla_usuarios():
 if DATABASE_URL:
     crear_tabla_usuarios()
 
-BCRA_TOKEN = os.environ.get("BCRA_TOKEN")
+def crear_tabla_indices():
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS indices (
+            id SERIAL PRIMARY KEY,
+            tipo TEXT,
+            fecha DATE,
+            valor FLOAT
+        );
+    """)
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+
+if DATABASE_URL:
+    crear_tabla_indices()
+
+
+def obtener_indice(tipo, fecha):
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT valor FROM indices
+        WHERE tipo = %s AND fecha <= %s
+        ORDER BY fecha DESC
+        LIMIT 1
+    """, (tipo, fecha))
+
+    resultado = cur.fetchone()
+
+    cur.close()
+    conn.close()
+
+    if resultado:
+        return resultado[0]
+    return None
+
+    cur.execute("""
+        SELECT valor FROM indices
+        WHERE tipo = %s AND fecha <= %s
+        ORDER BY fecha DESC
+        LIMIT 1
+    """, (tipo, fecha))
+
+    resultado = cur.fetchone()
+
+    cur.close()
+    conn.close()
+
+    if resultado:
+        return resultado[0]
+    return None
+
+def crear_tabla_indices():
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS indices (
+            id SERIAL PRIMARY KEY,
+            tipo TEXT,
+            fecha DATE,
+            valor FLOAT
+        );
+    """)
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+if DATABASE_URL:
+    crear_tabla_indices()
+
+
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "clave-dev")
@@ -88,6 +166,37 @@ def cargar_contratos():
 
     except (FileNotFoundError, json.JSONDecodeError):
         return []
+def aplicar_aumento(contrato):
+
+    if contrato.get("modo_aumento") == "original":
+        monto_base = contrato.get("monto_original", contrato["monto"])
+    else:
+        monto_base = contrato["monto"]
+
+    tipo = contrato["indice"]
+
+    fecha_inicio = contrato["inicio"]
+    hoy = str(date.today())
+
+    indice_inicio = obtener_indice(tipo, fecha_inicio)
+    indice_actual = obtener_indice(tipo, hoy)
+
+    if indice_inicio is None or indice_actual is None:
+        print("No hay índices cargados")
+        return
+
+    factor = indice_actual / indice_inicio
+    monto_nuevo = round(monto_base * factor, 2)
+
+    contrato["monto"] = monto_nuevo
+    contrato["ultimo_pago"] = hoy
+
+    contrato["historial"].append({
+        "fecha": hoy,
+        "indice": tipo,
+        "monto_anterior": monto_base,
+        "monto_nuevo": monto_nuevo
+    })
 
 def guardar_contratos(contratos):
     with open(ARCHIVO, "w", encoding="utf-8") as f:
@@ -99,93 +208,6 @@ def guardar_contratos(contratos):
 
 def sumar_meses(fecha, meses):
     return fecha + relativedelta(months=meses)
-
-
-def obtener_indice_bcra(codigo):
-    headers = {
-        "Authorization": f"Bearer {BCRA_TOKEN}"
-    }
-
-    if codigo == "ipc":
-        endpoint = "ipc"
-    else:
-        endpoint = "icl"
-
-    url = f"https://api.estadisticasbcra.com/{endpoint}"
-
-    try:
-        response = requests.get(url, headers=headers, timeout=10)
-
-        if response.status_code == 200:
-            return response.json()
-        else:
-            print("⚠️ Error BCRA:", response.status_code)
-            return None
-
-    except Exception as e:
-        print("⚠️ Error conexión BCRA:", str(e))
-        return None
-
-def obtener_valor_en_fecha(serie, fecha):
-    if isinstance(fecha, str):
-        fecha = datetime.strptime(fecha, "%Y-%m-%d").date()
-
-    valores_validos = []
-
-    for item in serie:
-        fecha_item = datetime.strptime(item["d"], "%Y-%m-%d").date()
-
-        if fecha_item <= fecha:
-            valores_validos.append(item)
-
-    if not valores_validos:
-        return None
-
-    return valores_validos[-1]["v"]
-
-
-def aplicar_aumento(contrato):
-
-    if contrato.get("modo_aumento") == "original":
-        monto_base = contrato.get("monto_original", contrato["monto"])
-    else:
-        monto_base = contrato["monto"]
-
-    if contrato["indice"] == "IPC":
-        codigo = "ipc"
-    else:
-        codigo = "icl"
-
-    serie = obtener_indice_bcra(codigo)
-
-    if not serie:
-     print("⚠️ No se pudo obtener índice. Se mantiene monto actual.")
-    return
-
-    fecha_inicio = contrato["inicio"]
-
-    indice_inicio = obtener_valor_en_fecha(serie, fecha_inicio)
-    indice_actual = obtener_valor_en_fecha(serie, date.today())
-
-    if indice_inicio is None or indice_actual is None:
-        print("No se pudo obtener valores del índice")
-        return
-
-    factor = indice_actual / indice_inicio
-    monto_nuevo = round(monto_base * factor, 2)
-
-    contrato["monto"] = monto_nuevo
-    contrato["ultimo_pago"] = str(date.today())
-
-    contrato["historial"].append({
-        "fecha": str(date.today()),
-        "indice": contrato["indice"],
-        "monto_anterior": monto_base,
-        "monto_nuevo": monto_nuevo
-    })
-
-
-
 
 def estado_pago(contrato):
     hoy = date.today()
