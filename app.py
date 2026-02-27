@@ -74,6 +74,10 @@ def cargar_contratos():
                     c["indice"] = "IPC"
                 if "monto" not in c:
                     c["monto"] = 0.0
+                if "monto_original" not in c:
+                        c["monto_original"] = c["monto"]
+                if "modo_aumento" not in c:
+                    c["modo_aumento"] = "acumulativo"
                 if "historial" not in c:
                     c["historial"] = []
 
@@ -115,12 +119,16 @@ def obtener_indice_bcra(codigo):
 
 
 def obtener_valor_en_fecha(serie, fecha):
-    fecha_str = str(fecha)
+    if isinstance(fecha, str):
+        fecha = datetime.strptime(fecha, "%Y-%m-%d").date()
 
-    valores_validos = [
-        item for item in serie
-        if item["d"] <= fecha_str
-    ]
+    valores_validos = []
+
+    for item in serie:
+        fecha_item = datetime.strptime(item["d"], "%Y-%m-%d").date()
+
+        if fecha_item <= fecha:
+            valores_validos.append(item)
 
     if not valores_validos:
         return None
@@ -129,7 +137,11 @@ def obtener_valor_en_fecha(serie, fecha):
 
 
 def aplicar_aumento(contrato):
-    monto_base = contrato["monto"]
+
+    if contrato.get("modo_aumento") == "original":
+        monto_base = contrato.get("monto_original", contrato["monto"])
+    else:
+        monto_base = contrato["monto"]
 
     if contrato["indice"] == "IPC":
         codigo = "ipc"
@@ -444,15 +456,17 @@ def nuevo():
         contratos = cargar_contratos()
 
         contratos.append({
-            "usuario": session["usuario"],
-            "inquilino": request.form["inquilino"],
-            "monto": float(request.form["monto"]),
-            "indice": request.form["indice"],
-            "inicio": request.form["inicio"],
-            "periodo": int(request.form["periodo"]),
-            "ultimo_pago": request.form["inicio"],
-            "historial": []
-        })
+    "usuario": session["usuario"],
+    "inquilino": request.form["inquilino"],
+    "monto": float(request.form["monto"]),
+    "monto_original": float(request.form["monto"]),  # 👈 NUEVO
+    "modo_aumento": request.form["modo_aumento"],    # 👈 NUEVO
+    "indice": request.form["indice"],
+    "inicio": request.form["inicio"],
+    "periodo": int(request.form["periodo"]),
+    "ultimo_pago": request.form["inicio"],
+    "historial": []
+})
 
         guardar_contratos(contratos)
         return redirect(url_for("index"))
@@ -472,6 +486,11 @@ def nuevo():
             <option>IPC</option>
             <option>ICL</option>
         </select><br><br>
+           Modo de aumento:<br>
+<select name="modo_aumento">
+    <option value="acumulativo">Acumulativo</option>
+    <option value="original">Desde monto original</option>
+</select><br><br>                       
 
         Inicio contrato:<br>
         <input type="date" name="inicio" required><br><br>
