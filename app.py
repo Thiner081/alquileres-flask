@@ -99,6 +99,7 @@ def sumar_meses(fecha, meses):
 
 
 def obtener_indice_bcra(codigo):
+    import os
     print("TOKEN:", BCRA_TOKEN)
 
     headers = {
@@ -106,20 +107,23 @@ def obtener_indice_bcra(codigo):
     }
 
     if codigo == "ipc":
-     endpoint = "ipc"
+        endpoint = "ipc"
     else:
-     endpoint = "indice_contratos_de_locacion"
+        endpoint = "indice_contratos_de_locacion"
 
     url = f"https://api.estadisticasbcra.com/{endpoint}"
 
-    print("URL:", url)
+    print("URL usada:", url)
 
     response = requests.get(url, headers=headers)
+
+    print("Status code:", response.status_code)
 
     if response.status_code == 200:
         return response.json()
     else:
         print("Error BCRA:", response.status_code)
+        print("Respuesta:", response.text)
         return None
 
 def obtener_valor_en_fecha(serie, fecha):
