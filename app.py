@@ -15,6 +15,14 @@ app.secret_key = os.environ.get("SECRET_KEY", "clave-dev")
 
 ARCHIVO = "contratos.json"
 ARCHIVO_USUARIOS = "usuarios.json"
+# Crear archivos si no existen (importante para Render)
+if not os.path.exists(ARCHIVO_USUARIOS):
+    with open(ARCHIVO_USUARIOS, "w", encoding="utf-8") as f:
+        json.dump([], f)
+
+if not os.path.exists(ARCHIVO):
+    with open(ARCHIVO, "w", encoding="utf-8") as f:
+        json.dump([], f)
 def cargar_usuarios():
     try:
         with open(ARCHIVO_USUARIOS, "r", encoding="utf-8") as f:
@@ -230,6 +238,48 @@ def login():
             <input type="password" name="password"><br><br>
             <button>Ingresar</button>
         </form>
+                           <br>
+<a href="/registro">Crear cuenta</a>       
+    """)
+@app.route("/registro", methods=["GET", "POST"])
+def registro():
+    if request.method == "POST":
+        usuarios = cargar_usuarios()
+
+        usuario_nuevo = request.form["usuario"].strip()
+        password_nuevo = request.form["password"]
+
+        # Validaciones mínimas
+        if len(usuario_nuevo) < 4:
+            return "El usuario debe tener al menos 4 caracteres"
+
+        if len(password_nuevo) < 6:
+            return "La contraseña debe tener al menos 6 caracteres"
+
+        if any(u["usuario"] == usuario_nuevo for u in usuarios):
+            return "El usuario ya existe"
+
+        usuarios.append({
+            "usuario": usuario_nuevo,
+            "password": generate_password_hash(password_nuevo)
+        })
+
+        with open(ARCHIVO_USUARIOS, "w", encoding="utf-8") as f:
+            json.dump(usuarios, f, indent=4)
+
+        return redirect(url_for("login"))
+
+    return render_template_string("""
+        <h2>Registro</h2>
+        <form method="post">
+            Usuario:<br>
+            <input name="usuario" required><br><br>
+            Contraseña:<br>
+            <input type="password" name="password" required><br><br>
+            <button>Crear cuenta</button>
+        </form>
+        <br>
+        <a href="/login">Ya tengo cuenta</a>
     """)
 @app.route("/logout")
 def logout():
