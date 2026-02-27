@@ -103,15 +103,20 @@ def obtener_indice_bcra(codigo):
         "Authorization": f"Bearer {BCRA_TOKEN}"
     }
 
+    if codigo == "ipc":
+        endpoint = "ipc"
+    else:
+        endpoint = "indice_contratos_locacion"
 
+    url = f"https://api.estadisticasbcra.com/{endpoint}"
 
-    url = f"https://api.estadisticasbcra.com/series/{codigo}"
     response = requests.get(url, headers=headers)
 
     if response.status_code == 200:
         return response.json()
     else:
         print("Error BCRA:", response.status_code)
+        print("URL usada:", url)
         return None
 
 
