@@ -8,7 +8,7 @@ from flask import session
 from functools import wraps
 from werkzeug.security import generate_password_hash, check_password_hash
 
-BCRA_TOKEN = "eyJhbGciOiJIUzUxMiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE4MDM2ODIxNjksInR5cGUiOiJleHRlcm5hbCIsInVzZXIiOiJvc2NhcmZvbnRhaW5hMjY0QGdtYWlsLmNvbSJ9.Toq3SYr8_o3nZ9P1jlBDUnsi0suYbReLLzeVbcn7Q8Es7AASn_auhJZTlcZZCfg4ik3QcOWwepold50OTD3hdw"
+BCRA_TOKEN = os.environ.get("BCRA_TOKEN")
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "clave-dev")
