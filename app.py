@@ -2,10 +2,25 @@ from flask import Flask, request, redirect, url_for, render_template_string
 import json
 from datetime import date, datetime
 from dateutil.relativedelta import relativedelta
+import requests
+import os
+from flask import session
+from functools import wraps
+from werkzeug.security import generate_password_hash, check_password_hash
+
+BCRA_TOKEN = "eyJhbGciOiJIUzUxMiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE4MDM2ODIxNjksInR5cGUiOiJleHRlcm5hbCIsInVzZXIiOiJvc2NhcmZvbnRhaW5hMjY0QGdtYWlsLmNvbSJ9.Toq3SYr8_o3nZ9P1jlBDUnsi0suYbReLLzeVbcn7Q8Es7AASn_auhJZTlcZZCfg4ik3QcOWwepold50OTD3hdw"
 
 app = Flask(__name__)
+app.secret_key = os.environ.get("SECRET_KEY", "clave-dev")
 
 ARCHIVO = "contratos.json"
+ARCHIVO_USUARIOS = "usuarios.json"
+def cargar_usuarios():
+    try:
+        with open(ARCHIVO_USUARIOS, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except:
+        return []
 
 # =====================
 # DATOS
@@ -48,15 +63,65 @@ def guardar_contratos(contratos):
 def sumar_meses(fecha, meses):
     return fecha + relativedelta(months=meses)
 
+
+def obtener_indice_bcra(codigo):
+    headers = {
+        "Authorization": f"Bearer {BCRA_TOKEN}"
+    }
+
+    if codigo == "ipc":
+        endpoint = "ipc"
+    else:
+        endpoint = "icl"
+
+    url = f"https://api.estadisticasbcra.com/{endpoint}"
+    response = requests.get(url, headers=headers)
+
+    if response.status_code == 200:
+        return response.json()
+    else:
+        print("Error BCRA:", response.status_code)
+        return None
+
+
+def obtener_valor_en_fecha(serie, fecha):
+    fecha_str = str(fecha)
+
+    valores_validos = [
+        item for item in serie
+        if item["d"] <= fecha_str
+    ]
+
+    if not valores_validos:
+        return None
+
+    return valores_validos[-1]["v"]
+
+
 def aplicar_aumento(contrato):
-    monto_anterior = contrato["monto"]
+    monto_base = contrato["monto"]
 
     if contrato["indice"] == "IPC":
-        factor = 1.10
+        codigo = "ipc"
     else:
-        factor = 1.12
+        codigo = "icl"
 
-    monto_nuevo = round(monto_anterior * factor, 2)
+    serie = obtener_indice_bcra(codigo)
+
+    if not serie:
+        return
+
+    fecha_inicio = contrato["ultimo_pago"]
+
+    indice_inicio = obtener_valor_en_fecha(serie, fecha_inicio)
+    indice_actual = obtener_valor_en_fecha(serie, date.today())
+
+    if not indice_inicio or not indice_actual:
+        print("No se pudo obtener valores del índice")
+        return
+
+    factor = indice_actual / indice_inicio
+    monto_nuevo = round(monto_base * factor, 2)
 
     contrato["monto"] = monto_nuevo
     contrato["ultimo_pago"] = str(date.today())
@@ -64,9 +129,12 @@ def aplicar_aumento(contrato):
     contrato["historial"].append({
         "fecha": str(date.today()),
         "indice": contrato["indice"],
-        "monto_anterior": monto_anterior,
+        "monto_anterior": monto_base,
         "monto_nuevo": monto_nuevo
     })
+
+
+
 
 def estado_pago(contrato):
     hoy = date.today()
@@ -95,14 +163,43 @@ def estado_pago(contrato):
 # AUMENTAR
 # =====================
 
-@app.route("/aumentar/<int:id>")
+@app.route("/aumentar/<int:id>", methods=["POST"])
 def aumentar(id):
-    contratos = cargar_contratos()
+    if "usuario" not in session:
+        return redirect(url_for("login"))
 
-    if id < 0 or id >= len(contratos):
+    contratos = cargar_contratos()
+    contratos_usuario = [c for c in contratos if c.get("usuario") == session["usuario"]]
+
+    if id < 0 or id >= len(contratos_usuario):
         return "Contrato no encontrado", 404
 
-    aplicar_aumento(contratos[id])
+    contrato = contratos_usuario[id]
+    aplicar_aumento(contrato)
+
+    guardar_contratos(contratos)
+
+    return redirect(url_for("index"))
+
+
+# =====================
+# ELIMINAR (POST correcto)
+# =====================
+
+@app.route("/eliminar/<int:id>", methods=["POST"])
+def eliminar(id):
+    if "usuario" not in session:
+        return redirect(url_for("login"))
+
+    contratos = cargar_contratos()
+    contratos_usuario = [c for c in contratos if c.get("usuario") == session["usuario"]]
+
+    if id < 0 or id >= len(contratos_usuario):
+        return "Contrato no encontrado", 404
+
+    contrato_a_borrar = contratos_usuario[id]
+    contratos.remove(contrato_a_borrar)
+
     guardar_contratos(contratos)
 
     return redirect(url_for("index"))
@@ -110,10 +207,43 @@ def aumentar(id):
 # =====================
 # HOME
 # =====================
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if request.method == "POST":
+        usuarios = cargar_usuarios()
+        usuario_form = request.form["usuario"]
+        password_form = request.form["password"]
+
+        for u in usuarios:
+            if u["usuario"] == usuario_form and check_password_hash(u["password"], password_form):
+                session["usuario"] = usuario_form
+                return redirect(url_for("index"))
+
+        return "Usuario o contraseña incorrectos"
+
+    return render_template_string("""
+        <h2>Login</h2>
+        <form method="post">
+            Usuario:<br>
+            <input name="usuario"><br><br>
+            Contraseña:<br>
+            <input type="password" name="password"><br><br>
+            <button>Ingresar</button>
+        </form>
+    """)
+@app.route("/logout")
+def logout():
+    session.pop("usuario", None)
+    return redirect(url_for("login"))
+
 
 @app.route("/")
 def index():
+    if "usuario" not in session:
+        return redirect(url_for("login"))
+
     contratos = cargar_contratos()
+    contratos = [c for c in contratos if c.get("usuario") == session["usuario"]]
 
     return render_template_string("""
 <!DOCTYPE html>
@@ -124,6 +254,8 @@ def index():
 <body style="font-family:Arial; background:#f5f5f5; padding:20px;">
 
 <h1>📄 Gestión de Alquileres</h1>
+  <p>Usuario: {{ session["usuario"] }}</p>
+<a href="/logout">Cerrar sesión</a>                                
 <p>Listado de contratos activos</p>
 
 <a href="/nuevo">
@@ -153,7 +285,7 @@ def index():
         📅 <b>Inicio:</b> {{ c["inicio"] }}
     </p>
 
-    <form action="/aumentar/{{ loop.index0 }}" method="get" style="display:inline;">
+   <form action="/aumentar/{{ loop.index0 }}" method="post" style="display:inline;">
         <button type="submit"
             onclick="return confirm('¿Aplicar aumento?')"
             style="background:#007bff;color:white;padding:8px;border:none;border-radius:4px;">
@@ -182,6 +314,14 @@ def index():
             ✏️ Editar
         </button>
     </a>
+      <form action="/eliminar/{{ loop.index0 }}" method="post" style="display:inline;">
+    <button 
+        type="submit"
+        onclick="return confirm('¿Seguro que querés eliminar este contrato?')"
+        style="padding:6px;margin-left:10px;background:red;color:white;border:none;border-radius:4px;">
+        ❌
+    </button>
+</form>                       
 
     {% if c["historial"] %}
         <details style="margin-top:10px;">
@@ -217,6 +357,7 @@ def nuevo():
         contratos = cargar_contratos()
 
         contratos.append({
+            "usuario": session["usuario"],
             "inquilino": request.form["inquilino"],
             "monto": float(request.form["monto"]),
             "indice": request.form["indice"],
@@ -268,12 +409,16 @@ def nuevo():
 
 @app.route("/editar/<int:id>", methods=["GET", "POST"])
 def editar(id):
-    contratos = cargar_contratos()
+    if "usuario" not in session:
+        return redirect(url_for("login"))
 
-    if id < 0 or id >= len(contratos):
+    contratos = cargar_contratos()
+    contratos_usuario = [c for c in contratos if c.get("usuario") == session["usuario"]]
+
+    if id < 0 or id >= len(contratos_usuario):
         return "Contrato no encontrado", 404
 
-    contrato = contratos[id]
+    contrato = contratos_usuario[id]
 
     if request.method == "POST":
         contrato["inquilino"] = request.form["inquilino"]
@@ -313,6 +458,7 @@ def editar(id):
     <br>
     <a href="/">⬅ Volver</a>
     """, c=contrato)
+    
 
 # =====================
 # START
