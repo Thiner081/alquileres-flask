@@ -99,6 +99,8 @@ def sumar_meses(fecha, meses):
 
 
 def obtener_indice_bcra(codigo):
+    print("TOKEN:", BCRA_TOKEN)
+
     headers = {
         "Authorization": f"Bearer {BCRA_TOKEN}"
     }
@@ -110,15 +112,15 @@ def obtener_indice_bcra(codigo):
 
     url = f"https://api.estadisticasbcra.com/{endpoint}"
 
+    print("URL:", url)
+
     response = requests.get(url, headers=headers)
 
     if response.status_code == 200:
         return response.json()
     else:
         print("Error BCRA:", response.status_code)
-        print("URL usada:", url)
         return None
-
 
 def obtener_valor_en_fecha(serie, fecha):
     if isinstance(fecha, str):
