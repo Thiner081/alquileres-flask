@@ -106,9 +106,9 @@ def obtener_indice_bcra(codigo):
     }
 
     if codigo == "ipc":
-        endpoint = "ipc"
+     endpoint = "ipc"
     else:
-        endpoint = "indice_contratos_locacion"
+     endpoint = "indice_contratos_de_locacion"
 
     url = f"https://api.estadisticasbcra.com/{endpoint}"
 
