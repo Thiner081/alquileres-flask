@@ -4,9 +4,31 @@ from datetime import date, datetime
 from dateutil.relativedelta import relativedelta
 import requests
 import os
+import psycopg2
 from flask import session
 from functools import wraps
 from werkzeug.security import generate_password_hash, check_password_hash
+from urllib.parse import urlparse
+
+DATABASE_URL = os.environ.get("DATABASE_URL")
+
+def get_db_connection():
+    return psycopg2.connect(DATABASE_URL)
+def crear_tabla_usuarios():
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS usuarios (
+            id SERIAL PRIMARY KEY,
+            usuario TEXT UNIQUE NOT NULL,
+            password TEXT NOT NULL
+        );
+    """)
+    conn.commit()
+    cur.close()
+    conn.close()
+
+crear_tabla_usuarios()
 
 BCRA_TOKEN = os.environ.get("BCRA_TOKEN")
 
@@ -218,14 +240,25 @@ def eliminar(id):
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
-        usuarios = cargar_usuarios()
         usuario_form = request.form["usuario"]
         password_form = request.form["password"]
 
-        for u in usuarios:
-            if u["usuario"] == usuario_form and check_password_hash(u["password"], password_form):
-                session["usuario"] = usuario_form
-                return redirect(url_for("index"))
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        cur.execute(
+            "SELECT password FROM usuarios WHERE usuario = %s",
+            (usuario_form,)
+        )
+
+        user = cur.fetchone()
+
+        cur.close()
+        conn.close()
+
+        if user and check_password_hash(user[0], password_form):
+            session["usuario"] = usuario_form
+            return redirect(url_for("index"))
 
         return "Usuario o contraseña incorrectos"
 
@@ -238,34 +271,38 @@ def login():
             <input type="password" name="password"><br><br>
             <button>Ingresar</button>
         </form>
-                           <br>
-<a href="/registro">Crear cuenta</a>       
+        <br>
+        <a href="/registro">Crear cuenta</a>
     """)
 @app.route("/registro", methods=["GET", "POST"])
 def registro():
     if request.method == "POST":
-        usuarios = cargar_usuarios()
-
         usuario_nuevo = request.form["usuario"].strip()
         password_nuevo = request.form["password"]
 
-        # Validaciones mínimas
         if len(usuario_nuevo) < 4:
             return "El usuario debe tener al menos 4 caracteres"
 
         if len(password_nuevo) < 6:
             return "La contraseña debe tener al menos 6 caracteres"
 
-        if any(u["usuario"] == usuario_nuevo for u in usuarios):
+        password_hash = generate_password_hash(password_nuevo)
+
+        try:
+            conn = get_db_connection()
+            cur = conn.cursor()
+
+            cur.execute(
+                "INSERT INTO usuarios (usuario, password) VALUES (%s, %s)",
+                (usuario_nuevo, password_hash)
+            )
+
+            conn.commit()
+            cur.close()
+            conn.close()
+
+        except psycopg2.errors.UniqueViolation:
             return "El usuario ya existe"
-
-        usuarios.append({
-            "usuario": usuario_nuevo,
-            "password": generate_password_hash(password_nuevo)
-        })
-
-        with open(ARCHIVO_USUARIOS, "w", encoding="utf-8") as f:
-            json.dump(usuarios, f, indent=4)
 
         return redirect(url_for("login"))
 
