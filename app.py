@@ -13,6 +13,8 @@ from urllib.parse import urlparse
 DATABASE_URL = os.environ.get("DATABASE_URL")
 
 def get_db_connection():
+    if not DATABASE_URL:
+        raise Exception("DATABASE_URL no configurada")
     return psycopg2.connect(DATABASE_URL)
 def crear_tabla_usuarios():
     conn = get_db_connection()
@@ -28,7 +30,8 @@ def crear_tabla_usuarios():
     cur.close()
     conn.close()
 
-crear_tabla_usuarios()
+if DATABASE_URL:
+    crear_tabla_usuarios()
 
 BCRA_TOKEN = os.environ.get("BCRA_TOKEN")
 
@@ -99,9 +102,6 @@ def sumar_meses(fecha, meses):
 
 
 def obtener_indice_bcra(codigo):
-    import os
-    print("TOKEN:", BCRA_TOKEN)
-
     headers = {
         "Authorization": f"Bearer {BCRA_TOKEN}"
     }
@@ -109,21 +109,21 @@ def obtener_indice_bcra(codigo):
     if codigo == "ipc":
         endpoint = "ipc"
     else:
-        endpoint = "indice_contratos_de_locacion"
+        endpoint = "icl"
 
     url = f"https://api.estadisticasbcra.com/{endpoint}"
 
-    print("URL usada:", url)
+    try:
+        response = requests.get(url, headers=headers, timeout=10)
 
-    response = requests.get(url, headers=headers)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            print("⚠️ Error BCRA:", response.status_code)
+            return None
 
-    print("Status code:", response.status_code)
-
-    if response.status_code == 200:
-        return response.json()
-    else:
-        print("Error BCRA:", response.status_code)
-        print("Respuesta:", response.text)
+    except Exception as e:
+        print("⚠️ Error conexión BCRA:", str(e))
         return None
 
 def obtener_valor_en_fecha(serie, fecha):
@@ -159,7 +159,8 @@ def aplicar_aumento(contrato):
     serie = obtener_indice_bcra(codigo)
 
     if not serie:
-        return
+     print("⚠️ No se pudo obtener índice. Se mantiene monto actual.")
+    return
 
     fecha_inicio = contrato["inicio"]
 
@@ -579,4 +580,5 @@ def editar(id):
 # =====================
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
