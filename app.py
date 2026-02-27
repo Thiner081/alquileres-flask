@@ -153,12 +153,12 @@ def aplicar_aumento(contrato):
     if not serie:
         return
 
-    fecha_inicio = contrato["ultimo_pago"]
+    fecha_inicio = contrato["inicio"]
 
     indice_inicio = obtener_valor_en_fecha(serie, fecha_inicio)
     indice_actual = obtener_valor_en_fecha(serie, date.today())
 
-    if not indice_inicio or not indice_actual:
+    if indice_inicio is None or indice_actual is None:
         print("No se pudo obtener valores del índice")
         return
 
