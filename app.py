@@ -10,7 +10,7 @@ from functools import wraps
 from werkzeug.security import generate_password_hash, check_password_hash
 from urllib.parse import urlparse
 
-DATABASE_URL = os.environ.get("DATABASE_URL")
+DATABASE_URL = os.environ.get("DATABASE_URL") or "postgresql://control_de_alquileres_user:dKyL44SZqFEWl8oWHVS9Xl5yI234aHhP@dpg-d6ggtchaae7s73bc5au0-a.oregon-postgres.render.com/control_de_alquileres"
 
 def get_db_connection():
     if not DATABASE_URL:
@@ -76,6 +76,7 @@ def obtener_indice(tipo, fecha):
         return float(resultado[0])
 
     return None
+
 
 def crear_tabla_indices():
     conn = get_db_connection()
@@ -591,4 +592,3 @@ def editar(id):
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
-    # deploy
