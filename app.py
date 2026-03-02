@@ -60,7 +60,8 @@ def obtener_indice(tipo, fecha):
     cur = conn.cursor()
 
     cur.execute("""
-        SELECT valor FROM indices
+        SELECT valor
+        FROM indices
         WHERE tipo = %s AND fecha <= %s
         ORDER BY fecha DESC
         LIMIT 1
@@ -72,23 +73,8 @@ def obtener_indice(tipo, fecha):
     conn.close()
 
     if resultado:
-        return resultado[0]
-    return None
+        return float(resultado[0])
 
-    cur.execute("""
-        SELECT valor FROM indices
-        WHERE tipo = %s AND fecha <= %s
-        ORDER BY fecha DESC
-        LIMIT 1
-    """, (tipo, fecha))
-
-    resultado = cur.fetchone()
-
-    cur.close()
-    conn.close()
-
-    if resultado:
-        return resultado[0]
     return None
 
 def crear_tabla_indices():
@@ -107,9 +93,6 @@ def crear_tabla_indices():
     conn.commit()
     cur.close()
     conn.close()
-
-if DATABASE_URL:
-    crear_tabla_indices()
 
 
 
@@ -168,22 +151,26 @@ def cargar_contratos():
         return []
 def aplicar_aumento(contrato):
 
-    if contrato.get("modo_aumento") == "original":
-        monto_base = contrato.get("monto_original", contrato["monto"])
-    else:
-        monto_base = contrato["monto"]
-
     tipo = contrato["indice"]
-
     fecha_inicio = contrato["inicio"]
     hoy = str(date.today())
 
     indice_inicio = obtener_indice(tipo, fecha_inicio)
     indice_actual = obtener_indice(tipo, hoy)
 
+    print("DEBUG → Tipo:", tipo)
+    print("DEBUG → Fecha inicio:", fecha_inicio)
+    print("DEBUG → Indice inicio:", indice_inicio)
+    print("DEBUG → Indice actual:", indice_actual)
+
     if indice_inicio is None or indice_actual is None:
-        print("No hay índices cargados")
+        print("⚠️ No se encontraron índices en la base")
         return
+
+    if contrato.get("modo_aumento") == "original":
+        monto_base = contrato.get("monto_original", contrato["monto"])
+    else:
+        monto_base = contrato["monto"]
 
     factor = indice_actual / indice_inicio
     monto_nuevo = round(monto_base * factor, 2)
