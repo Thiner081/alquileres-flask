@@ -32,6 +32,9 @@ def crear_tabla_usuarios():
 if DATABASE_URL:
     crear_tabla_usuarios()
 
+
+   
+
 def crear_tabla_indices():
     conn = get_db_connection()
     cur = conn.cursor()
@@ -128,6 +131,25 @@ def crear_tabla_contratos():
     cur.close()
     conn.close()
 
+def crear_tabla_historial():
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS historial_aumentos (
+            id SERIAL PRIMARY KEY,
+            contrato_id INTEGER,
+            fecha DATE,
+            indice TEXT,
+            monto_anterior FLOAT,
+            monto_nuevo FLOAT
+        );
+    """)
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
 
 # ==============================
 # EJECUTAR CREACIÓN DE TABLAS
@@ -137,6 +159,7 @@ if DATABASE_URL:
     crear_tabla_usuarios()
     crear_tabla_indices()
     crear_tabla_contratos()
+    crear_tabla_historial()
 
     
 def obtener_indice(tipo, fecha):
@@ -583,48 +606,47 @@ def index():
 
     rows = cur.fetchall()
 
-    cur.close()
-    conn.close()
-
     contratos = []
 
     for row in rows:
+        contrato_id = row[0]
 
-     contrato_id = row[0]
+        # 🔹 Traer historial
+        cur.execute("""
+            SELECT fecha, indice, monto_anterior, monto_nuevo
+            FROM historial_aumentos
+            WHERE contrato_id = %s
+            ORDER BY fecha DESC
+        """, (contrato_id,))
 
-    # 🔹 Traer historial real
-    cur.execute("""
-        SELECT fecha, indice, monto_anterior, monto_nuevo
-        FROM historial_aumentos
-        WHERE contrato_id = %s
-        ORDER BY fecha DESC
-    """, (contrato_id,))
+        historial_rows = cur.fetchall()
 
-    historial_rows = cur.fetchall()
+        historial = []
+        for h in historial_rows:
+            historial.append({
+                "fecha": str(h[0]),
+                "indice": h[1],
+                "monto_anterior": float(h[2]),
+                "monto_nuevo": float(h[3])
+            })
 
-    historial = []
-    for h in historial_rows:
-        historial.append({
-            "fecha": str(h[0]),
-            "indice": h[1],
-            "monto_anterior": float(h[2]),
-            "monto_nuevo": float(h[3])
+        contratos.append({
+            "id": contrato_id,
+            "inquilino": row[1],
+            "monto": row[2],
+            "monto_original": row[3],
+            "indice": row[4],
+            "inicio": str(row[5]),
+            "periodo": row[6],
+            "ultimo_pago": str(row[7]) if row[7] else str(row[5]),
+            "modo_aumento": row[8],
+            "historial": historial
         })
 
-    contratos.append({
-        "id": contrato_id,
-        "inquilino": row[1],
-        "monto": row[2],
-        "monto_original": row[3],
-        "indice": row[4],
-        "inicio": str(row[5]),
-        "periodo": row[6],
-        "ultimo_pago": str(row[7]) if row[7] else str(row[5]),
-        "modo_aumento": row[8],
-        "historial": historial
-    })
+    cur.close()
+    conn.close()
 
-    return render_template_string("""
+    return render_template_string(""" 
 <!DOCTYPE html>
 <html>
 <head>
