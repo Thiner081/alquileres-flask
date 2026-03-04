@@ -447,12 +447,18 @@ def gestionar_indices():
     return render_template_string("""
     <h2>Gestión de Índices</h2>
 
-    <form method="post">
-        Tipo:<br>
-        <select name="tipo">
-            <option>IPC</option>
-            <option>ICL</option>
-        </select><br><br>
+<form action="/actualizar_indices" method="post" style="margin-bottom:15px;">
+    <button style="padding:8px;background:#28a745;color:white;border:none;border-radius:4px;">
+        🔄 Actualizar índices oficiales
+    </button>
+</form>
+
+<form method="post">
+    Tipo:<br>
+    <select name="tipo">
+        <option>IPC</option>
+        <option>ICL</option>
+    </select><br><br>
 
         Fecha:<br>
         <input type="date" name="fecha" required><br><br>
@@ -486,6 +492,22 @@ def gestionar_indices():
     <br>
     <a href="/">⬅ Volver</a>
     """, rows=rows)
+
+def guardar_indice(tipo, fecha, valor):
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            INSERT INTO indices (tipo, fecha, valor)
+            VALUES (%s, %s, %s)
+            ON CONFLICT (tipo, fecha) DO NOTHING
+        """, (tipo, fecha, valor))
+
+        conn.commit()
+    finally:
+        cur.close()
+        conn.close()
 
     
 
@@ -579,6 +601,57 @@ def registro():
         <br>
         <a href="/login">Ya tengo cuenta</a>
     """)
+
+@app.route("/actualizar_indices", methods=["POST"])
+def actualizar_indices():
+    if "usuario" not in session:
+        return redirect(url_for("login"))
+
+    if session.get("rol") != "admin":
+        return "Acceso no autorizado", 403
+
+    try:
+        hoy = date.today().replace(day=1)
+
+        # ===== IPC (SIMULADO por ahora) =====
+        indice_anterior = obtener_indice("IPC", hoy)
+
+        if indice_anterior:
+            nuevo_ipc = round(indice_anterior * 1.08, 2)
+        else:
+            nuevo_ipc = 100
+
+        guardar_indice("IPC", hoy, nuevo_ipc)
+
+        # ===== ICL REAL (BCRA) =====
+        token = os.environ.get("BCRA_TOKEN")
+
+        headers = {
+            "Authorization": f"Bearer {token}"
+        }
+
+        response = requests.get(
+            "https://api.estadisticasbcra.com/icl",
+            headers=headers
+        )
+
+        if response.status_code == 200:
+            data = response.json()
+
+            if data:
+                ultimo = data[-1]
+                fecha_icl = ultimo["d"]
+                valor_icl = float(ultimo["v"])
+
+                guardar_indice("ICL", fecha_icl, valor_icl)
+        else:
+            print("Error consultando ICL BCRA:", response.status_code)
+
+        return redirect(url_for("gestionar_indices"))
+
+    except Exception as e:
+        return f"Error actualizando índices: {str(e)}"
+
 @app.route("/logout")
 def logout():
     session.pop("usuario", None)
