@@ -1,5 +1,4 @@
 from flask import Flask, request, redirect, url_for, render_template_string
-import json
 from datetime import date, datetime
 from dateutil.relativedelta import relativedelta
 import requests
@@ -50,11 +49,96 @@ def crear_tabla_indices():
     cur.close()
     conn.close()
 
-
 if DATABASE_URL:
     crear_tabla_indices()
 
+# ==============================
+# CONEXIÓN A BASE DE DATOS
+# ==============================
 
+def get_db_connection():
+    if not DATABASE_URL:
+        raise Exception("DATABASE_URL no configurada")
+
+    return psycopg2.connect(
+        DATABASE_URL,
+        sslmode="require"
+    )
+
+
+# ==============================
+# CREACIÓN DE TABLAS
+# ==============================
+
+def crear_tabla_usuarios():
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS usuarios (
+            id SERIAL PRIMARY KEY,
+            usuario TEXT UNIQUE NOT NULL,
+            password TEXT NOT NULL
+        );
+    """)
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+
+def crear_tabla_indices():
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS indices (
+            id SERIAL PRIMARY KEY,
+            tipo TEXT,
+            fecha DATE,
+            valor FLOAT
+        );
+    """)
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+
+def crear_tabla_contratos():
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS contratos (
+            id SERIAL PRIMARY KEY,
+            usuario TEXT,
+            inquilino TEXT,
+            monto FLOAT,
+            monto_original FLOAT,
+            indice TEXT,
+            inicio DATE,
+            periodo INTEGER,
+            ultimo_aumento DATE,
+            modo_aumento TEXT
+        );
+    """)
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+
+# ==============================
+# EJECUTAR CREACIÓN DE TABLAS
+# ==============================
+
+if DATABASE_URL:
+    crear_tabla_usuarios()
+    crear_tabla_indices()
+    crear_tabla_contratos()
+
+    
 def obtener_indice(tipo, fecha):
     conn = get_db_connection()
     cur = conn.cursor()
@@ -100,95 +184,58 @@ def crear_tabla_indices():
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "clave-dev")
 
-ARCHIVO = "contratos.json"
-ARCHIVO_USUARIOS = "usuarios.json"
-# Crear archivos si no existen (importante para Render)
-if not os.path.exists(ARCHIVO_USUARIOS):
-    with open(ARCHIVO_USUARIOS, "w", encoding="utf-8") as f:
-        json.dump([], f)
 
-if not os.path.exists(ARCHIVO):
-    with open(ARCHIVO, "w", encoding="utf-8") as f:
-        json.dump([], f)
-def cargar_usuarios():
-    try:
-        with open(ARCHIVO_USUARIOS, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except:
-        return []
 
 # =====================
 # DATOS
 # =====================
 
-def cargar_contratos():
-    try:
-        with open(ARCHIVO, "r", encoding="utf-8") as f:
-            contratos = json.load(f)
 
-            hoy = str(date.today())
-
-            for c in contratos:
-                if "inicio" not in c:
-                    c["inicio"] = hoy
-                if "ultimo_pago" not in c:
-                    c["ultimo_pago"] = c["inicio"]
-                if "periodo" not in c:
-                    c["periodo"] = 6
-                if "indice" not in c:
-                    c["indice"] = "IPC"
-                if "monto" not in c:
-                    c["monto"] = 0.0
-                if "monto_original" not in c:
-                        c["monto_original"] = c["monto"]
-                if "modo_aumento" not in c:
-                    c["modo_aumento"] = "acumulativo"
-                if "historial" not in c:
-                    c["historial"] = []
-
-            return contratos
-
-    except (FileNotFoundError, json.JSONDecodeError):
-        return []
 def aplicar_aumento(contrato):
 
     tipo = contrato["indice"]
-    fecha_inicio = contrato["inicio"]
-    hoy = str(date.today())
+    hoy = date.today()
 
-    indice_inicio = obtener_indice(tipo, fecha_inicio)
+    ultimo_pago = datetime.strptime(
+        contrato["ultimo_pago"],
+        "%Y-%m-%d"
+    ).date()
+
+    periodo = int(contrato["periodo"])
+
+    # Verificamos si corresponde aumento
+    proximo_aumento = ultimo_pago + relativedelta(months=periodo)
+
+    if hoy < proximo_aumento:
+        print("⚠️ Todavía no corresponde aumento")
+        return
+
+    indice_anterior = obtener_indice(tipo, ultimo_pago)
     indice_actual = obtener_indice(tipo, hoy)
 
-    print("DEBUG → Tipo:", tipo)
-    print("DEBUG → Fecha inicio:", fecha_inicio)
-    print("DEBUG → Indice inicio:", indice_inicio)
-    print("DEBUG → Indice actual:", indice_actual)
-
-    if indice_inicio is None or indice_actual is None:
-        print("⚠️ No se encontraron índices en la base")
+    if not indice_anterior or not indice_actual:
+        print("⚠️ No se encontraron índices")
         return
 
     if contrato.get("modo_aumento") == "original":
-        monto_base = contrato.get("monto_original", contrato["monto"])
+        monto_base = contrato["monto_original"]
     else:
         monto_base = contrato["monto"]
 
-    factor = indice_actual / indice_inicio
+    factor = indice_actual / indice_anterior
     monto_nuevo = round(monto_base * factor, 2)
 
-    contrato["monto"] = monto_nuevo
-    contrato["ultimo_pago"] = hoy
-
     contrato["historial"].append({
-        "fecha": hoy,
+        "fecha": str(hoy),
         "indice": tipo,
         "monto_anterior": monto_base,
         "monto_nuevo": monto_nuevo
     })
 
-def guardar_contratos(contratos):
-    with open(ARCHIVO, "w", encoding="utf-8") as f:
-        json.dump(contratos, f, indent=4, ensure_ascii=False)
+    contrato["monto"] = monto_nuevo
+    contrato["ultimo_pago"] = str(hoy)
+
+
 
 # =====================
 # LOGICA DE FECHAS
@@ -229,18 +276,87 @@ def aumentar(id):
     if "usuario" not in session:
         return redirect(url_for("login"))
 
-    contratos = cargar_contratos()
-    contratos_usuario = [c for c in contratos if c.get("usuario") == session["usuario"]]
+    usuario_actual = session["usuario"]
+    hoy = date.today()
 
-    if id < 0 or id >= len(contratos_usuario):
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    # Traer contrato
+    cur.execute("""
+        SELECT monto, monto_original, indice,
+               periodo, ultimo_aumento, modo_aumento
+        FROM contratos
+        WHERE id = %s AND usuario = %s
+    """, (id, usuario_actual))
+
+    row = cur.fetchone()
+
+    if not row:
+        cur.close()
+        conn.close()
         return "Contrato no encontrado", 404
 
-    contrato = contratos_usuario[id]
-    aplicar_aumento(contrato)
+    monto_actual = float(row[0])
+    monto_original = float(row[1])
+    tipo_indice = row[2]
+    periodo = int(row[3])
+    ultimo_aumento = row[4]
+    modo_aumento = row[5]
 
-    guardar_contratos(contratos)
+    # Verificar si corresponde aumento
+    proximo_aumento = ultimo_aumento + relativedelta(months=periodo)
+
+    if hoy < proximo_aumento:
+        cur.close()
+        conn.close()
+        return redirect(url_for("index"))
+
+    indice_anterior = obtener_indice(tipo_indice, ultimo_aumento)
+    indice_actual = obtener_indice(tipo_indice, hoy)
+
+    if not indice_anterior or not indice_actual:
+        cur.close()
+        conn.close()
+        return redirect(url_for("index"))
+
+    if modo_aumento == "original":
+        base = monto_original
+    else:
+        base = monto_actual
+
+    factor = indice_actual / indice_anterior
+    monto_nuevo = round(base * factor, 2)
+
+    # 1️⃣ Guardar historial
+    cur.execute("""
+        INSERT INTO historial_aumentos (
+            contrato_id,
+            fecha,
+            indice,
+            monto_anterior,
+            monto_nuevo
+        )
+        VALUES (%s, %s, %s, %s, %s)
+    """, (id, hoy, tipo_indice, base, monto_nuevo))
+
+    # 2️⃣ Actualizar contrato
+    cur.execute("""
+        UPDATE contratos
+        SET monto = %s,
+            ultimo_aumento = %s
+        WHERE id = %s AND usuario = %s
+    """, (monto_nuevo, hoy, id, usuario_actual))
+
+    conn.commit()
+    cur.close()
+    conn.close()
 
     return redirect(url_for("index"))
+
+    return "Función deshabilitada (JSON eliminado)", 500
+
+    
 
 
 # =====================
@@ -252,24 +368,112 @@ def eliminar(id):
     if "usuario" not in session:
         return redirect(url_for("login"))
 
-    contratos = cargar_contratos()
-    contratos_usuario = [c for c in contratos if c.get("usuario") == session["usuario"]]
+    usuario_actual = session["usuario"]
 
-    if id < 0 or id >= len(contratos_usuario):
-        return "Contrato no encontrado", 404
+    conn = get_db_connection()
+    cur = conn.cursor()
 
-    contrato_a_borrar = contratos_usuario[id]
-    contratos.remove(contrato_a_borrar)
+    # Seguridad: eliminar solo si pertenece al usuario
+    cur.execute("""
+        DELETE FROM contratos
+        WHERE id = %s AND usuario = %s
+    """, (id, usuario_actual))
 
-    guardar_contratos(contratos)
+    conn.commit()
+    cur.close()
+    conn.close()
 
     return redirect(url_for("index"))
+
+    return "Función deshabilitada (JSON eliminado)", 500  
+@app.route("/indices", methods=["GET", "POST"])
+def gestionar_indices():
+    if "usuario" not in session:
+        return redirect(url_for("login"))
+    
+    if session.get("rol") != "admin":
+        return "Acceso no autorizado", 403
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    if request.method == "POST":
+        tipo = request.form["tipo"]
+        fecha = request.form["fecha"]
+        valor = float(request.form["valor"])
+
+        cur.execute("""
+            INSERT INTO indices (tipo, fecha, valor)
+            VALUES (%s, %s, %s)
+        """, (tipo, fecha, valor))
+
+        conn.commit()
+
+    # Traer lista de índices
+    cur.execute("""
+        SELECT id, tipo, fecha, valor
+        FROM indices
+        ORDER BY fecha DESC
+    """)
+
+    rows = cur.fetchall()
+
+    cur.close()
+    conn.close()
+
+    return render_template_string("""
+    <h2>Gestión de Índices</h2>
+
+    <form method="post">
+        Tipo:<br>
+        <select name="tipo">
+            <option>IPC</option>
+            <option>ICL</option>
+        </select><br><br>
+
+        Fecha:<br>
+        <input type="date" name="fecha" required><br><br>
+
+        Valor:<br>
+        <input type="number" step="0.01" name="valor" required><br><br>
+
+        <button>Guardar índice</button>
+    </form>
+
+    <hr>
+
+    <h3>Historial de índices</h3>
+
+    <table border="1" cellpadding="5">
+        <tr>
+            <th>Tipo</th>
+            <th>Fecha</th>
+            <th>Valor</th>
+        </tr>
+
+        {% for r in rows %}
+        <tr>
+            <td>{{ r[1] }}</td>
+            <td>{{ r[2] }}</td>
+            <td>{{ r[3] }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+
+    <br>
+    <a href="/">⬅ Volver</a>
+    """, rows=rows)
+
+    
+
+   
 
 # =====================
 # HOME
 # =====================
 @app.route("/login", methods=["GET", "POST"])
 def login():
+
     if request.method == "POST":
         usuario_form = request.form["usuario"]
         password_form = request.form["password"]
@@ -278,7 +482,7 @@ def login():
         cur = conn.cursor()
 
         cur.execute(
-            "SELECT password FROM usuarios WHERE usuario = %s",
+            "SELECT password, rol FROM usuarios WHERE usuario = %s",
             (usuario_form,)
         )
 
@@ -289,10 +493,13 @@ def login():
 
         if user and check_password_hash(user[0], password_form):
             session["usuario"] = usuario_form
+            session["rol"] = user[1]   # 👈 guardamos el rol
             return redirect(url_for("index"))
 
-        return "Usuario o contraseña incorrectos"
+        else:
+            return "Usuario o contraseña incorrectos"
 
+    # Si es GET, mostramos el formulario
     return render_template_string("""
         <h2>Login</h2>
         <form method="post">
@@ -360,8 +567,62 @@ def index():
     if "usuario" not in session:
         return redirect(url_for("login"))
 
-    contratos = cargar_contratos()
-    contratos = [c for c in contratos if c.get("usuario") == session["usuario"]]
+    usuario_actual = session["usuario"]
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT id, inquilino, monto, monto_original,
+               indice, inicio, periodo,
+               ultimo_aumento, modo_aumento
+        FROM contratos
+        WHERE usuario = %s
+        ORDER BY inicio DESC
+    """, (usuario_actual,))
+
+    rows = cur.fetchall()
+
+    cur.close()
+    conn.close()
+
+    contratos = []
+
+    for row in rows:
+
+     contrato_id = row[0]
+
+    # 🔹 Traer historial real
+    cur.execute("""
+        SELECT fecha, indice, monto_anterior, monto_nuevo
+        FROM historial_aumentos
+        WHERE contrato_id = %s
+        ORDER BY fecha DESC
+    """, (contrato_id,))
+
+    historial_rows = cur.fetchall()
+
+    historial = []
+    for h in historial_rows:
+        historial.append({
+            "fecha": str(h[0]),
+            "indice": h[1],
+            "monto_anterior": float(h[2]),
+            "monto_nuevo": float(h[3])
+        })
+
+    contratos.append({
+        "id": contrato_id,
+        "inquilino": row[1],
+        "monto": row[2],
+        "monto_original": row[3],
+        "indice": row[4],
+        "inicio": str(row[5]),
+        "periodo": row[6],
+        "ultimo_pago": str(row[7]) if row[7] else str(row[5]),
+        "modo_aumento": row[8],
+        "historial": historial
+    })
 
     return render_template_string("""
 <!DOCTYPE html>
@@ -379,8 +640,15 @@ def index():
 <a href="/nuevo">
     <button style="padding:10px; font-size:16px;">
         ➕ Nuevo alquiler
+    </button>  
+</a>                            
+ {% if session["rol"] == "admin" %}
+<a href="/indices">
+    <button style="padding:6px; margin-left:10px;">
+        📊 Gestionar Índices
     </button>
 </a>
+{% endif %}
 
 <hr><br>
 
@@ -403,7 +671,7 @@ def index():
         📅 <b>Inicio:</b> {{ c["inicio"] }}
     </p>
 
-   <form action="/aumentar/{{ loop.index0 }}" method="post" style="display:inline;">
+   <form action="/aumentar/{{ c["id"] }}" method="post" style="display:inline;">
         <button type="submit"
             onclick="return confirm('¿Aplicar aumento?')"
             style="background:#007bff;color:white;padding:8px;border:none;border-radius:4px;">
@@ -427,12 +695,12 @@ def index():
         </button>
     {% endif %}
 
-    <a href="/editar/{{ loop.index0 }}">
+    <a href="/editar/{{ c["id"] }}">
         <button style="padding:6px;margin-left:10px;">
             ✏️ Editar
         </button>
     </a>
-      <form action="/eliminar/{{ loop.index0 }}" method="post" style="display:inline;">
+      <form action="/eliminar/{{ c["id"]}}" method="post" style="display:inline;">
     <button 
         type="submit"
         onclick="return confirm('¿Seguro que querés eliminar este contrato?')"
@@ -471,26 +739,55 @@ def index():
 
 @app.route("/nuevo", methods=["GET", "POST"])
 def nuevo():
+    if "usuario" not in session:
+        return redirect(url_for("login"))
+
     if request.method == "POST":
-        contratos = cargar_contratos()
 
-        contratos.append({
-    "usuario": session["usuario"],
-    "inquilino": request.form["inquilino"],
-    "monto": float(request.form["monto"]),
-    "monto_original": float(request.form["monto"]),  # 👈 NUEVO
-    "modo_aumento": request.form["modo_aumento"],    # 👈 NUEVO
-    "indice": request.form["indice"],
-    "inicio": request.form["inicio"],
-    "periodo": int(request.form["periodo"]),
-    "ultimo_pago": request.form["inicio"],
-    "historial": []
-})
+        usuario_actual = session["usuario"]
 
-        guardar_contratos(contratos)
+        inquilino = request.form["inquilino"]
+        monto = float(request.form["monto"])
+        indice = request.form["indice"]
+        modo_aumento = request.form["modo_aumento"]
+        inicio = request.form["inicio"]
+        periodo = int(request.form["periodo"])
+
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        cur.execute("""
+            INSERT INTO contratos (
+                usuario,
+                inquilino,
+                monto,
+                monto_original,
+                indice,
+                inicio,
+                periodo,
+                ultimo_aumento,
+                modo_aumento
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """, (
+            usuario_actual,
+            inquilino,
+            monto,
+            monto,          # monto_original = monto inicial
+            indice,
+            inicio,
+            periodo,
+            inicio,         # ultimo_aumento arranca en inicio
+            modo_aumento
+        ))
+
+        conn.commit()
+        cur.close()
+        conn.close()
+
         return redirect(url_for("index"))
 
-    return render_template_string("""
+    return render_template_string(""" 
     <h2>Nuevo alquiler</h2>
 
     <form method="post">
@@ -537,22 +834,59 @@ def editar(id):
     if "usuario" not in session:
         return redirect(url_for("login"))
 
-    contratos = cargar_contratos()
-    contratos_usuario = [c for c in contratos if c.get("usuario") == session["usuario"]]
+    usuario_actual = session["usuario"]
 
-    if id < 0 or id >= len(contratos_usuario):
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    # Primero traemos el contrato
+    cur.execute("""
+        SELECT id, inquilino, monto, monto_original,
+               indice, inicio, periodo,
+               ultimo_aumento, modo_aumento
+        FROM contratos
+        WHERE id = %s AND usuario = %s
+    """, (id, usuario_actual))
+
+    row = cur.fetchone()
+
+    if not row:
+        cur.close()
+        conn.close()
         return "Contrato no encontrado", 404
 
-    contrato = contratos_usuario[id]
-
     if request.method == "POST":
-        contrato["inquilino"] = request.form["inquilino"]
-        contrato["monto"] = float(request.form["monto"])
-        contrato["indice"] = request.form["indice"]
-        contrato["periodo"] = int(request.form["periodo"])
 
-        guardar_contratos(contratos)
+        inquilino = request.form["inquilino"]
+        monto = float(request.form["monto"])
+        indice = request.form["indice"]
+        periodo = int(request.form["periodo"])
+
+        cur.execute("""
+            UPDATE contratos
+            SET inquilino = %s,
+                monto = %s,
+                indice = %s,
+                periodo = %s
+            WHERE id = %s AND usuario = %s
+        """, (inquilino, monto, indice, periodo, id, usuario_actual))
+
+        conn.commit()
+        cur.close()
+        conn.close()
+
         return redirect(url_for("index"))
+
+    contrato = {
+        "id": row[0],
+        "inquilino": row[1],
+        "monto": row[2],
+        "indice": row[4],
+        "periodo": row[6]
+    }
+
+    cur.close()
+    conn.close()
 
     return render_template_string("""
     <h2>Editar alquiler</h2>

@@ -1,6 +1,0 @@
-[
-  {
-    "usuario": "admin",
-    "password": "pbkdf2:sha256:..."
-  }
-]
