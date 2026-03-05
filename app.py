@@ -654,7 +654,7 @@ def actualizar_indices():
         token = os.environ.get("BCRA_TOKEN")
 
         headers = {
-            "Authorization": f"Bearer {token}"
+            "Authorization": f"BEARER {token}"
         }
 
         response = requests.get(
