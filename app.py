@@ -305,7 +305,6 @@ def aumentar(id):
     conn = get_db_connection()
     cur = conn.cursor()
 
-    # Traer contrato
     cur.execute("""
         SELECT monto, monto_original, indice,
                periodo, ultimo_aumento, modo_aumento
@@ -327,7 +326,6 @@ def aumentar(id):
     ultimo_aumento = row[4]
     modo_aumento = row[5]
 
-    # Verificar si corresponde aumento
     proximo_aumento = ultimo_aumento + relativedelta(months=periodo)
 
     if hoy < proximo_aumento:
@@ -335,35 +333,56 @@ def aumentar(id):
         conn.close()
         return redirect(url_for("index"))
 
-    indice_anterior = obtener_indice(tipo_indice, ultimo_aumento)
-    indice_actual = obtener_indice(tipo_indice, hoy)
+    # =========================
+    # 🔹 OBTENER ÍNDICES CORRECTAMENTE
+    # =========================
+
+    if tipo_indice == "IPC":
+        fecha_base = ultimo_aumento.replace(day=1)
+        fecha_actual = hoy.replace(day=1)
+
+        indice_anterior = obtener_indice("IPC", fecha_base)
+        indice_actual = obtener_indice("IPC", fecha_actual)
+    else:
+        indice_anterior = obtener_indice(tipo_indice, ultimo_aumento)
+        indice_actual = obtener_indice(tipo_indice, hoy)
 
     if not indice_anterior or not indice_actual:
         cur.close()
         conn.close()
         return redirect(url_for("index"))
 
-    if modo_aumento == "original":
-        base = monto_original
-    else:
-        base = monto_actual
+    # =========================
+    # 🔹 CALCULAR AUMENTO
+    # =========================
+
+    base = monto_original if modo_aumento == "original" else monto_actual
 
     factor = indice_actual / indice_anterior
+    porcentaje = round((factor - 1) * 100, 2)
+
     monto_nuevo = round(base * factor, 2)
 
-    # 1️⃣ Guardar historial
-    cur.execute("""
-        INSERT INTO historial_aumentos (
-            contrato_id,
-            fecha,
-            indice,
-            monto_anterior,
-            monto_nuevo
-        )
-        VALUES (%s, %s, %s, %s, %s)
-    """, (id, hoy, tipo_indice, base, monto_nuevo))
+    # =========================
+    # 🔹 GUARDAR HISTORIAL
+    # =========================
 
-    # 2️⃣ Actualizar contrato
+    cur.execute("""
+    INSERT INTO historial_aumentos (
+        contrato_id,
+        fecha,
+        indice,
+        monto_anterior,
+        monto_nuevo,
+        porcentaje
+    )
+    VALUES (%s, %s, %s, %s, %s, %s)
+""", (id, hoy, tipo_indice, monto_actual, monto_nuevo, porcentaje))
+
+    # =========================
+    # 🔹 ACTUALIZAR CONTRATO
+    # =========================
+
     cur.execute("""
         UPDATE contratos
         SET monto = %s,
@@ -613,15 +632,23 @@ def actualizar_indices():
     try:
         hoy = date.today().replace(day=1)
 
-        # ===== IPC (SIMULADO por ahora) =====
-        indice_anterior = obtener_indice("IPC", hoy)
+          # ===== IPC REAL (INDEC espejo) =====
+        response_ipc = requests.get(
+            "https://api.argentinadatos.com/v1/finanzas/indices/ipc"
+        )
 
-        if indice_anterior:
-            nuevo_ipc = round(indice_anterior * 1.08, 2)
+        if response_ipc.status_code == 200:
+            data_ipc = response_ipc.json()
+
+            if data_ipc:
+                ultimo_ipc = data_ipc[-1]
+
+                fecha_ipc = ultimo_ipc["fecha"][:10]
+                valor_ipc = float(ultimo_ipc["valor"])
+
+                guardar_indice("IPC", fecha_ipc, valor_ipc)
         else:
-            nuevo_ipc = 100
-
-        guardar_indice("IPC", hoy, nuevo_ipc)
+            print("Error consultando IPC:", response_ipc.status_code)
 
         # ===== ICL REAL (BCRA) =====
         token = os.environ.get("BCRA_TOKEN")
@@ -686,22 +713,23 @@ def index():
 
         # 🔹 Traer historial
         cur.execute("""
-            SELECT fecha, indice, monto_anterior, monto_nuevo
-            FROM historial_aumentos
-            WHERE contrato_id = %s
-            ORDER BY fecha DESC
-        """, (contrato_id,))
+    SELECT fecha, indice, monto_anterior, monto_nuevo, porcentaje
+    FROM historial_aumentos
+    WHERE contrato_id = %s
+    ORDER BY fecha DESC
+""", (contrato_id,))
 
         historial_rows = cur.fetchall()
 
         historial = []
         for h in historial_rows:
             historial.append({
-                "fecha": str(h[0]),
-                "indice": h[1],
-                "monto_anterior": float(h[2]),
-                "monto_nuevo": float(h[3])
-            })
+    "fecha": str(h[0]),
+    "indice": h[1],
+    "monto_anterior": float(h[2]),
+    "monto_nuevo": float(h[3]),
+    "porcentaje": float(h[4]) if h[4] else 0
+})
 
         contratos.append({
             "id": contrato_id,
@@ -810,8 +838,9 @@ def index():
             <ul>
                 {% for h in c["historial"] %}
                 <li>
-                    {{ h["fecha"] }} — {{ h["indice"] }} —
-                    ${{ h["monto_anterior"] }} → ${{ h["monto_nuevo"] }}
+                   {{ h["fecha"] }} — {{ h["indice"] }} —
+                  +{{ h["porcentaje"] }}% —
+                  ${{ h["monto_anterior"] }} → ${{ h["monto_nuevo"] }} 
                 </li>
                 {% endfor %}
             </ul>
