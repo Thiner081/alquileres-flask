@@ -622,15 +622,15 @@ def actualizar_indices():
 )
 
         if response_ipc.status_code == 200:
-            data_ipc = response_ipc.json()
+         data_ipc = response_ipc.json()
 
-            if data_ipc:
-                ultimo_ipc = data_ipc[-1]
+        if data_ipc:
+           for item in data_ipc[-24:]:  # últimos 24 meses
 
-                fecha_ipc = ultimo_ipc["fecha"][:10]
-                valor_ipc = float(ultimo_ipc["valor"])
+            fecha_ipc = item["fecha"][:10]
+            valor_ipc = float(item["valor"])
 
-                guardar_indice("IPC", fecha_ipc, valor_ipc)
+            guardar_indice("IPC", fecha_ipc, valor_ipc)
         else:
             print("Error consultando IPC:", response_ipc.status_code)
 
@@ -646,7 +646,7 @@ def actualizar_indices():
             data = response_icl.json()
 
             if data:
-                for item in data[-30:]:   # últimos 30 días
+                for item in data[-365:]: # últimos 365 días (ICL es diario, IPC mensual)
 
                     fecha_icl = item["fecha"][:10]
                     valor_icl = float(item["valor"])
@@ -711,7 +711,7 @@ def index():
     "indice": h[1],
     "monto_anterior": float(h[2]),
     "monto_nuevo": float(h[3]),
-    "porcentaje": round(float(h[4]), 2) if h[4] else 0
+    "porcentaje": float(h[4]) if h[4] else 0
 })
 
         contratos.append({
