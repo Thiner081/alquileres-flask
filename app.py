@@ -11,10 +11,6 @@ from urllib.parse import urlparse
 
 DATABASE_URL = os.environ.get("DATABASE_URL") or "postgresql://control_de_alquileres_user:dKyL44SZqFEWl8oWHVS9Xl5yI234aHhP@dpg-d6ggtchaae7s73bc5au0-a.oregon-postgres.render.com/control_de_alquileres"
 
-def get_db_connection():
-    if not DATABASE_URL:
-        raise Exception("DATABASE_URL no configurada")
-    return psycopg2.connect(DATABASE_URL)
 def crear_tabla_usuarios():
     conn = get_db_connection()
     cur = conn.cursor()
@@ -32,28 +28,6 @@ def crear_tabla_usuarios():
 if DATABASE_URL:
     crear_tabla_usuarios()
 
-
-   
-
-def crear_tabla_indices():
-    conn = get_db_connection()
-    cur = conn.cursor()
-
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS indices (
-            id SERIAL PRIMARY KEY,
-            tipo TEXT,
-            fecha DATE,
-            valor FLOAT
-        );
-    """)
-
-    conn.commit()
-    cur.close()
-    conn.close()
-
-if DATABASE_URL:
-    crear_tabla_indices()
 
 # ==============================
 # CONEXIÓN A BASE DE DATOS
@@ -142,13 +116,34 @@ def crear_tabla_historial():
             fecha DATE,
             indice TEXT,
             monto_anterior FLOAT,
-            monto_nuevo FLOAT
+            monto_nuevo FLOAT,
+            porcentaje FLOAT  
         );
     """)
 
     conn.commit()
     cur.close()
     conn.close()
+
+def crear_indices_db():
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+    CREATE INDEX IF NOT EXISTS idx_indices_tipo_fecha
+    ON indices(tipo, fecha);
+    """)
+
+    cur.execute("""
+    CREATE INDEX IF NOT EXISTS idx_historial_contrato
+    ON historial_aumentos(contrato_id);
+    """)
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+crear_indices_db()
 
 
 # ==============================
@@ -163,26 +158,27 @@ if DATABASE_URL:
 
     
 def obtener_indice(tipo, fecha):
+
     conn = get_db_connection()
     cur = conn.cursor()
 
     cur.execute("""
         SELECT valor
         FROM indices
-        WHERE tipo = %s AND fecha <= %s
+        WHERE tipo = %s
+        AND fecha <= %s
         ORDER BY fecha DESC
         LIMIT 1
     """, (tipo, fecha))
 
-    resultado = cur.fetchone()
+    row = cur.fetchone()
 
-    cur.close()
     conn.close()
 
-    if resultado:
-        return float(resultado[0])
-
-    return None
+    if row:
+        return float(row[0])
+    else:
+        raise Exception(f"No hay índice {tipo} disponible para {fecha}")
 
 
 def crear_tabla_indices():
@@ -234,7 +230,8 @@ def aplicar_aumento(contrato):
         return
 
     indice_anterior = obtener_indice(tipo, ultimo_pago)
-    indice_actual = obtener_indice(tipo, hoy)
+    fecha_actual = hoy.replace(day=1)
+    indice_actual = obtener_indice(tipo, fecha_actual)
 
     if not indice_anterior or not indice_actual:
         print("⚠️ No se encontraron índices")
@@ -246,7 +243,7 @@ def aplicar_aumento(contrato):
         monto_base = contrato["monto"]
 
     factor = indice_actual / indice_anterior
-    monto_nuevo = round(monto_base * factor, 2)
+    monto_nuevo = monto_base * factor
 
     contrato["historial"].append({
         "fecha": str(hoy),
@@ -338,11 +335,11 @@ def aumentar(id):
     # =========================
 
     if tipo_indice == "IPC":
-        fecha_base = ultimo_aumento.replace(day=1)
-        fecha_actual = hoy.replace(day=1)
+       fecha_base = ultimo_aumento.replace(day=1)
+       fecha_actual = hoy.replace(day=1) - relativedelta(months=1)
 
-        indice_anterior = obtener_indice("IPC", fecha_base)
-        indice_actual = obtener_indice("IPC", fecha_actual)
+       indice_anterior = obtener_indice("IPC", fecha_base)
+       indice_actual = obtener_indice("IPC", fecha_actual)
     else:
         indice_anterior = obtener_indice(tipo_indice, ultimo_aumento)
         indice_actual = obtener_indice(tipo_indice, hoy)
@@ -359,10 +356,9 @@ def aumentar(id):
     base = monto_original if modo_aumento == "original" else monto_actual
 
     factor = indice_actual / indice_anterior
-    porcentaje = round((factor - 1) * 100, 2)
+    porcentaje = (factor - 1) * 100
 
-    monto_nuevo = round(base * factor, 2)
-
+    monto_nuevo = base * factor
     # =========================
     # 🔹 GUARDAR HISTORIAL
     # =========================
@@ -518,19 +514,22 @@ def guardar_indice(tipo, fecha, valor):
 
     try:
         cur.execute("""
-            INSERT INTO indices (tipo, fecha, valor)
-            VALUES (%s, %s, %s)
-            ON CONFLICT (tipo, fecha) DO NOTHING
-        """, (tipo, fecha, valor))
-
+            CREATE TABLE IF NOT EXISTS indices (
+        id SERIAL PRIMARY KEY,
+        tipo TEXT,
+        fecha DATE,
+        valor FLOAT,
+        UNIQUE(tipo, fecha)
+    );
+""")
         conn.commit()
-    finally:
         cur.close()
         conn.close()
-
-    
-
-   
+    except Exception as e:
+        conn.rollback()
+        cur.close()
+        conn.close()
+        raise e
 
 # =====================
 # HOME
@@ -623,6 +622,7 @@ def registro():
 
 @app.route("/actualizar_indices", methods=["POST"])
 def actualizar_indices():
+
     if "usuario" not in session:
         return redirect(url_for("login"))
 
@@ -632,10 +632,11 @@ def actualizar_indices():
     try:
         hoy = date.today().replace(day=1)
 
-          # ===== IPC REAL (INDEC espejo) =====
+        # ===== IPC =====
         response_ipc = requests.get(
-            "https://api.argentinadatos.com/v1/finanzas/indices/ipc"
-        )
+    "https://api.argentinadatos.com/v1/finanzas/indices/ipc",
+    timeout=10
+)
 
         if response_ipc.status_code == 200:
             data_ipc = response_ipc.json()
@@ -650,34 +651,33 @@ def actualizar_indices():
         else:
             print("Error consultando IPC:", response_ipc.status_code)
 
-        # ===== ICL REAL (BCRA) =====
-        token = os.environ.get("BCRA_TOKEN")
 
-        headers = {
-            "Authorization": f"BEARER {token}"
-        }
+        # ===== ICL SIN TOKEN =====
+        response_icl = requests.get(
+    "https://api.argentinadatos.com/v1/finanzas/indices/icl",
+    timeout=10
+)
 
-        response = requests.get(
-            "https://api.estadisticasbcra.com/icl",
-            headers=headers
-        )
+        if response_icl.status_code == 200:
 
-        if response.status_code == 200:
-            data = response.json()
+            data = response_icl.json()
 
             if data:
                 ultimo = data[-1]
-                fecha_icl = ultimo["d"]
-                valor_icl = float(ultimo["v"])
+
+                fecha_icl = ultimo["fecha"][:10]
+                valor_icl = float(ultimo["valor"])
 
                 guardar_indice("ICL", fecha_icl, valor_icl)
+
         else:
-            print("Error consultando ICL BCRA:", response.status_code)
+            print("Error consultando ICL:", response_icl.status_code)
 
         return redirect(url_for("gestionar_indices"))
 
     except Exception as e:
         return f"Error actualizando índices: {str(e)}"
+
 
 @app.route("/logout")
 def logout():
