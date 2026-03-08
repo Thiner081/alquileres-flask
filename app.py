@@ -264,6 +264,7 @@ def estado_pago(contrato):
 
 @app.route("/aumentar/<int:id>", methods=["POST"])
 def aumentar(id):
+
     if "usuario" not in session:
         return redirect(url_for("login"))
 
@@ -302,18 +303,24 @@ def aumentar(id):
         return redirect(url_for("index"))
 
     # =========================
-    # 🔹 OBTENER ÍNDICES CORRECTAMENTE
+    # OBTENER ÍNDICES
     # =========================
 
     if tipo_indice == "IPC":
-       fecha_base = ultimo_aumento.replace(day=1)
-       fecha_actual = hoy.replace(day=1) - relativedelta(months=1)
 
-       indice_anterior = obtener_indice("IPC", fecha_base)
-       indice_actual = obtener_indice("IPC", fecha_actual)
+        fecha_base = ultimo_aumento.replace(day=1)
+        fecha_actual = hoy.replace(day=1) - relativedelta(months=1)
+
+        indice_anterior = obtener_indice("IPC", fecha_base)
+        indice_actual = obtener_indice("IPC", fecha_actual)
+
     else:
-        indice_anterior = obtener_indice(tipo_indice, ultimo_aumento)
-        indice_actual = obtener_indice(tipo_indice, hoy)
+
+        fecha_base = ultimo_aumento
+        fecha_actual = hoy - relativedelta(days=1)
+
+        indice_anterior = obtener_indice(tipo_indice, fecha_base)
+        indice_actual = obtener_indice(tipo_indice, fecha_actual)
 
     if not indice_anterior or not indice_actual:
         cur.close()
@@ -321,33 +328,40 @@ def aumentar(id):
         return redirect(url_for("index"))
 
     # =========================
-    # 🔹 CALCULAR AUMENTO
+    # CALCULAR AUMENTO
     # =========================
 
     base = monto_original if modo_aumento == "original" else monto_actual
 
     factor = indice_actual / indice_anterior
     porcentaje = (factor - 1) * 100
-
     monto_nuevo = base * factor
+
     # =========================
-    # 🔹 GUARDAR HISTORIAL
+    # GUARDAR HISTORIAL
     # =========================
 
     cur.execute("""
-    INSERT INTO historial_aumentos (
-        contrato_id,
-        fecha,
-        indice,
-        monto_anterior,
+        INSERT INTO historial_aumentos (
+            contrato_id,
+            fecha,
+            indice,
+            monto_anterior,
+            monto_nuevo,
+            porcentaje
+        )
+        VALUES (%s, %s, %s, %s, %s, %s)
+    """, (
+        id,
+        hoy,
+        tipo_indice,
+        monto_actual,
         monto_nuevo,
         porcentaje
-    )
-    VALUES (%s, %s, %s, %s, %s, %s)
-""", (id, hoy, tipo_indice, monto_actual, monto_nuevo, porcentaje))
+    ))
 
     # =========================
-    # 🔹 ACTUALIZAR CONTRATO
+    # ACTUALIZAR CONTRATO
     # =========================
 
     cur.execute("""
@@ -355,14 +369,18 @@ def aumentar(id):
         SET monto = %s,
             ultimo_aumento = %s
         WHERE id = %s AND usuario = %s
-    """, (monto_nuevo, hoy, id, usuario_actual))
+    """, (
+        monto_nuevo,
+        hoy,
+        id,
+        usuario_actual
+    ))
 
     conn.commit()
     cur.close()
     conn.close()
 
     return redirect(url_for("index"))
-
     return "Función deshabilitada (JSON eliminado)", 500
 
     
@@ -628,12 +646,12 @@ def actualizar_indices():
             data = response_icl.json()
 
             if data:
-                ultimo = data[-1]
+                for item in data[-30:]:   # últimos 30 días
 
-                fecha_icl = ultimo["fecha"][:10]
-                valor_icl = float(ultimo["valor"])
+                    fecha_icl = item["fecha"][:10]
+                    valor_icl = float(item["valor"])
 
-                guardar_indice("ICL", fecha_icl, valor_icl)
+                    guardar_indice("ICL", fecha_icl, valor_icl)
 
         else:
             print("Error consultando ICL:", response_icl.status_code)
