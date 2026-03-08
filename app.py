@@ -74,6 +74,7 @@ def crear_tabla_indices():
             tipo TEXT,
             fecha DATE,
             valor FLOAT
+            UNIQUE(tipo, fecha)
         );
     """)
 
@@ -509,27 +510,21 @@ def gestionar_indices():
     """, rows=rows)
 
 def guardar_indice(tipo, fecha, valor):
+
     conn = get_db_connection()
     cur = conn.cursor()
 
-    try:
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS indices (
-        id SERIAL PRIMARY KEY,
-        tipo TEXT,
-        fecha DATE,
-        valor FLOAT,
-        UNIQUE(tipo, fecha)
-    );
-""")
-        conn.commit()
-        cur.close()
-        conn.close()
-    except Exception as e:
-        conn.rollback()
-        cur.close()
-        conn.close()
-        raise e
+    cur.execute("""
+        INSERT INTO indices (tipo, fecha, valor)
+        VALUES (%s, %s, %s)
+        ON CONFLICT (tipo, fecha)
+        DO UPDATE SET valor = EXCLUDED.valor
+    """, (tipo, fecha, valor))
+
+    conn.commit()
+
+    cur.close()
+    conn.close()
 
 # =====================
 # HOME
@@ -728,7 +723,7 @@ def index():
     "indice": h[1],
     "monto_anterior": float(h[2]),
     "monto_nuevo": float(h[3]),
-    "porcentaje": float(h[4]) if h[4] else 0
+    "porcentaje": round(float(h[4]), 2) if h[4] else 0
 })
 
         contratos.append({
