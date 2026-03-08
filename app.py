@@ -26,7 +26,7 @@ DATABASE_URL = os.environ.get("DATABASE_URL") or "postgresql://control_de_alquil
 # ==============================
 
 def get_db_connection():
-    conn = psycopg2.connect(os.environ.get("DATABASE_URL"))
+    conn = psycopg2.connect(DATABASE_URL)
     return conn
 
 # ==============================
@@ -630,9 +630,14 @@ def actualizar_indices():
             fecha_ipc = item["fecha"][:10]
             valor_ipc = float(item["valor"])
 
+            fecha_ipc = item["fecha"][:10]
+            valor_ipc = float(item["valor"])
+
             guardar_indice("IPC", fecha_ipc, valor_ipc)
         else:
             print("Error consultando IPC:", response_ipc.status_code)
+
+            
 
 
         # ===== ICL SIN TOKEN =====
