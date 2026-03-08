@@ -9,7 +9,7 @@ from functools import wraps
 from werkzeug.security import generate_password_hash, check_password_hash
 from urllib.parse import urlparse
 
-app = Flask(__name__)
+
 
 DATABASE_URL = os.environ.get("DATABASE_URL") or "postgresql://control_de_alquileres_user:dKyL44SZqFEWl8oWHVS9Xl5yI234aHhP@dpg-d6ggtchaae7s73bc5au0-a.oregon-postgres.render.com/control_de_alquileres"
 
@@ -56,14 +56,14 @@ def crear_tabla_indices():
     cur = conn.cursor()
 
     cur.execute("""
-        CREATE TABLE IF NOT EXISTS indices (
-            id SERIAL PRIMARY KEY,
-            tipo TEXT,
-            fecha DATE,
-            valor FLOAT
-            UNIQUE(tipo, fecha)
-        );
-    """)
+    CREATE TABLE IF NOT EXISTS indices (
+        id SERIAL PRIMARY KEY,
+        tipo TEXT,
+        fecha DATE,
+        valor FLOAT,
+        UNIQUE(tipo, fecha)
+    );
+""")
 
     conn.commit()
     cur.close()
@@ -169,22 +169,7 @@ def obtener_indice(tipo, fecha):
         raise Exception(f"No hay índice {tipo} disponible para {fecha}")
 
 
-def crear_tabla_indices():
-    conn = get_db_connection()
-    cur = conn.cursor()
 
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS indices (
-            id SERIAL PRIMARY KEY,
-            tipo TEXT,
-            fecha DATE,
-            valor FLOAT
-        );
-    """)
-
-    conn.commit()
-    cur.close()
-    conn.close()
 
 
 
