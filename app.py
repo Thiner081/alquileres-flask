@@ -9,24 +9,12 @@ from functools import wraps
 from werkzeug.security import generate_password_hash, check_password_hash
 from urllib.parse import urlparse
 
+app = Flask(__name__)
+
 DATABASE_URL = os.environ.get("DATABASE_URL") or "postgresql://control_de_alquileres_user:dKyL44SZqFEWl8oWHVS9Xl5yI234aHhP@dpg-d6ggtchaae7s73bc5au0-a.oregon-postgres.render.com/control_de_alquileres"
 
-def crear_tabla_usuarios():
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS usuarios (
-            id SERIAL PRIMARY KEY,
-            usuario TEXT UNIQUE NOT NULL,
-            password TEXT NOT NULL
-        );
-    """)
-    conn.commit()
-    cur.close()
-    conn.close()
 
-if DATABASE_URL:
-    crear_tabla_usuarios()
+
 
 
 # ==============================
@@ -41,7 +29,6 @@ def get_db_connection():
         DATABASE_URL,
         sslmode="require"
     )
-
 
 # ==============================
 # CREACIÓN DE TABLAS
