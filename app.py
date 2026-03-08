@@ -2,12 +2,16 @@ from flask import Flask, request, redirect, url_for, render_template_string
 from datetime import date, datetime
 from dateutil.relativedelta import relativedelta
 import requests
+from flask import Flask, render_template, request, redirect, session
 import os
 import psycopg2
 from flask import session
 from functools import wraps
 from werkzeug.security import generate_password_hash, check_password_hash
 from urllib.parse import urlparse
+
+app = Flask(__name__)
+app.secret_key = os.environ.get("SECRET_KEY", "clave-dev")
 
 
 
@@ -22,13 +26,8 @@ DATABASE_URL = os.environ.get("DATABASE_URL") or "postgresql://control_de_alquil
 # ==============================
 
 def get_db_connection():
-    if not DATABASE_URL:
-        raise Exception("DATABASE_URL no configurada")
-
-    return psycopg2.connect(
-        DATABASE_URL,
-        sslmode="require"
-    )
+    conn = psycopg2.connect(os.environ.get("DATABASE_URL"))
+    return conn
 
 # ==============================
 # CREACIÓN DE TABLAS
@@ -42,7 +41,8 @@ def crear_tabla_usuarios():
         CREATE TABLE IF NOT EXISTS usuarios (
             id SERIAL PRIMARY KEY,
             usuario TEXT UNIQUE NOT NULL,
-            password TEXT NOT NULL
+            password TEXT NOT NULL,
+            rol TEXT DEFAULT 'admin'
         );
     """)
 
@@ -173,8 +173,6 @@ def obtener_indice(tipo, fecha):
 
 
 
-app = Flask(__name__)
-app.secret_key = os.environ.get("SECRET_KEY", "clave-dev")
 
 
 
